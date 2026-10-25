@@ -1,0 +1,88 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Civilization Lab</title>
+<style>
+:root{--bg:#f4f3ef;--p:#fff;--b:#dcdad3;--t:#2b2b2b;--m:#78766f;--a:#3b5b78;--c:#b5651d}
+*{box-sizing:border-box}body{margin:0;font:13px system-ui,sans-serif;background:var(--bg);color:var(--t)}
+header{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 12px;background:var(--p);border-bottom:1px solid var(--b)}
+h1{font-size:14px;letter-spacing:.12em;margin:0 8px 0 0}button,select,input[type=number]{font:inherit;padding:5px 9px;border:1px solid var(--b);background:#fff;border-radius:6px;cursor:pointer;transition:background .15s}
+button:hover{background:#eceae3}button.on{background:var(--a);color:#fff}
+main{display:grid;grid-template-columns:1fr 340px;gap:10px;padding:10px}
+.card{background:var(--p);border:1px solid var(--b);border-radius:8px;padding:10px}
+canvas{display:block;width:100%}#cv{aspect-ratio:3/2;background:#eef0ea;border-radius:6px}
+#charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin-top:10px}#charts canvas{height:110px}
+aside{display:flex;flex-direction:column;gap:10px}h3{margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--m)}
+label{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:4px 0}input[type=range]{flex:1}
+#log{max-height:200px;overflow:auto;font-size:12px}#log div{padding:2px 0;border-bottom:1px solid #f0eee8}.tm{color:var(--m);margin-right:6px}
+table{width:100%;border-collapse:collapse}td,th{padding:2px 4px;text-align:right}td:first-child,th:first-child{text-align:left}
+@media(max-width:820px){main{grid-template-columns:1fr}}
+</style></head><body>
+<header><h1>CIVILIZATION LAB</h1>
+<button id=play>▶ Play</button><button id=step>Step</button>
+<select id=spd><option value=1>1×</option><option value=3>3×</option><option value=8>8×</option></select>
+<span id=clock style="min-width:120px"></span>
+<button id=flood title="then click the map">Flood…</button><button id=close>Close workplace</button><button id=crop>Crop failure</button><button id=outb>Outbreak</button>
+<select id=tgt><option>Both</option><option>A</option><option>B</option></select>
+<input id=seed type=number value=42 style="width:70px"><button id=new>New</button></header>
+<main><div><div class=card><canvas id=cv></canvas><div id=charts></div></div></div>
+<aside>
+<div class=card><h3>Time travel</h3><label>Rewind <input id=rw type=range min=0 max=0 value=0><span id=rwv></span></label>
+<button id=br>Branch B from here</button> <button id=nb>Drop B</button></div>
+<div class=card><h3>Policy (applies to target)</h3>
+<label>Food subsidy <input id=pS type=range min=0 max=100 value=0><span id=vS>0%</span></label>
+<label>Hospital beds <input id=pH type=range min=0 max=20 value=6><span id=vH>6</span></label>
+<label>Income tax <input id=pT type=range min=0 max=40 value=10><span id=vT>10%</span></label></div>
+<div class=card><h3>Compare A vs B</h3><div id=cmp></div></div>
+<div class=card><h3>Citizen inspector</h3><div id=ins>Click a citizen dot.</div></div>
+<div class=card><h3>Causal log (A)</h3><div id=log></div></div>
+</aside></main>
+<script src="sim.js"></script>
+<script>
+const $=i=>document.getElementById(i),TPS=12,CT=['A','B'];
+let seed=42,A,B,sel=null,paused=true,acc=0,last=0,armed=false,uiT=0;
+const col=c=>!c.alive?'#999':c.health>70?'#5c8a5a':c.health>40?'#c8962e':'#b04a3f';
+function reset(){seed=+$('seed').value||42;A={s:Sim.create(seed),acts:[]};B=null;sel=null;paused=true;ui()}
+const T=()=>{const v=$('tgt').value;return v==='Both'?[A,B].filter(Boolean):v==='A'?[A]:B?[B]:[]};
+function act(a){for(const t of T()){const x={...a,t:t.s.t};Sim.apply(t.s,x);t.acts.push(x)}ui()}
+function step(){Sim.tick(A.s);if(B)Sim.tick(B.s)}
+$('play').onclick=()=>{paused=!paused;ui()};$('step').onclick=()=>{paused=true;step();ui()};
+$('new').onclick=reset;$('crop').onclick=()=>act({type:'crop'});$('outb').onclick=()=>act({type:'outbreak',n:5});$('close').onclick=()=>act({type:'close'});
+$('flood').onclick=()=>{armed=!armed;$('flood').classList.toggle('on',armed)};
+for(const[k,i,f]of[['subsidy','pS',v=>v/100],['hosp','pH',v=>v],['tax','pT',v=>v/100]]){
+ $(i).oninput=()=>$('v'+i[1]).textContent=$(i).value+(i==='pH'?'':'%');$(i).onchange=()=>act({type:'policy',k,v:f(+$(i).value)})}
+$('rw').onchange=()=>{const to=+$('rw').value;paused=true;A.acts=A.acts.filter(a=>a.t<to);A.s=Sim.replay(seed,A.acts,to);B=null;ui()};
+$('br').onclick=()=>{B={s:Sim.clone(A.s),acts:A.acts.map(a=>({...a}))};$('tgt').value='B';ui()};
+$('nb').onclick=()=>{B=null;$('tgt').value='Both';ui()};
+const cv=$('cv'),cx=cv.getContext('2d');let cs=1;
+cv.onclick=e=>{const r=cv.getBoundingClientRect(),x=(e.clientX-r.left)/cs,y=(e.clientY-r.top)/cs;
+ if(armed){armed=false;$('flood').classList.remove('on');act({type:'flood',x:Math.round(x-.5),y:Math.round(y-.5),r:3});return}
+ let b=null,bd=.8;for(const c of A.s.c){const d=Math.hypot(c.x+.5-x,c.y+.5-y);if(d<bd){bd=d;b=c.id}}sel=b;ui()};
+const COL={farm:'#b9c98a',shop:'#d9976f',office:'#8fa5b8',hospital:'#f3efe8',home:'#d9c7a8'};
+function draw(){const w=cv.clientWidth,h=cv.clientHeight,d=devicePixelRatio||1;if(cv.width!==w*d){cv.width=w*d;cv.height=h*d}
+ const s=A.s;cs=w/s.W;cx.setTransform(d,0,0,d,0,0);cx.clearRect(0,0,w,h);cx.strokeStyle='#e2e4dc';
+ for(let i=0;i<=s.W;i++){cx.beginPath();cx.moveTo(i*cs,0);cx.lineTo(i*cs,h);cx.stroke()}for(let j=0;j<=s.H;j++){cx.beginPath();cx.moveTo(0,j*cs);cx.lineTo(w,j*cs);cx.stroke()}
+ for(const b of s.b){const q=b.type==='home'?.7:.9,x=(b.x+(1-q)/2)*cs,y=(b.y+(1-q)/2)*cs,z=q*cs;cx.globalAlpha=b.open?1:.35;cx.fillStyle=COL[b.type];cx.fillRect(x,y,z,z);cx.strokeStyle='#8a877e';cx.strokeRect(x,y,z,z);
+  cx.fillStyle='#55534d';cx.font=`${cs*.35}px system-ui`;cx.textAlign='center';
+  if(b.type==='hospital'){cx.fillStyle='#b04a3f';cx.fillRect(x+z*.42,y+z*.2,z*.16,z*.6);cx.fillRect(x+z*.2,y+z*.42,z*.6,z*.16)}
+  else if(b.type==='farm'){cx.fillText('F'+(b.stock|0),x+z/2,y+z*.62)}else if(b.type==='shop')cx.fillText('S'+b.stock,x+z/2,y+z*.62);else if(b.type==='office')cx.fillText('W',x+z/2,y+z*.62);
+  cx.globalAlpha=1;if(!b.open){cx.strokeStyle='#b04a3f';cx.beginPath();cx.moveTo(x,y);cx.lineTo(x+z,y+z);cx.stroke()}}
+ for(const c of s.c){if(!c.alive)continue;cx.fillStyle=col(c);cx.beginPath();cx.arc((c.x+.5)*cs,(c.y+.5)*cs,cs*.11,0,7);cx.fill();
+  if(c.ill){cx.strokeStyle='#7a3b8c';cx.lineWidth=1.5;cx.stroke();cx.lineWidth=1}if(c.id===sel){cx.strokeStyle='#222';cx.beginPath();cx.arc((c.x+.5)*cs,(c.y+.5)*cs,cs*.25,0,7);cx.stroke()}}}
+const CH=[['pop','Population'],['food','Food stock'],['emp','Employment %'],['med','Median wealth'],['hp','Mean health']];
+for(const[k,n]of CH){const c=document.createElement('canvas');c.id='ch'+k;$('charts').appendChild(c)}
+function charts(){for(const[k,n]of CH){const c=$('ch'+k),w=c.clientWidth,h=c.clientHeight,d=devicePixelRatio||1;if(c.width!==w*d){c.width=w*d;c.height=h*d}
+ const g=c.getContext('2d');g.setTransform(d,0,0,d,0,0);g.clearRect(0,0,w,h);const hs=[A.s.hist,...(B?[B.s.hist]:[])];
+ let lo=1e9,hi=-1e9;for(const H of hs)for(const p of H){lo=Math.min(lo,p[k]);hi=Math.max(hi,p[k])}if(hi-lo<1){hi+=1;lo-=1}
+ const tm=Math.max(10,A.s.t);g.strokeStyle='#ecebe5';for(let i=1;i<4;i++){g.beginPath();g.moveTo(0,18+(h-24)*i/4);g.lineTo(w,18+(h-24)*i/4);g.stroke()}
+ hs.forEach((H,i)=>{g.strokeStyle=i?'#b5651d':'#3b5b78';g.lineWidth=1.8;g.setLineDash(i?[5,3]:[]);g.beginPath();H.forEach((p,j)=>{const x=p.t/tm*(w-4)+2,y=18+(h-24)*(1-(p[k]-lo)/(hi-lo));j?g.lineTo(x,y):g.moveTo(x,y)});g.stroke()});
+ g.setLineDash([]);g.fillStyle='#78766f';g.font='11px system-ui';g.fillText(n+'  '+hs.map(H=>H[H.length-1][k].toFixed(k==='pop'?0:1)).join(' | '),2,11)}}
+function ui(){const s=A.s,st=Sim.stats(s),tod=s.t%Sim.R.dayLen;$('play').textContent=paused?'▶ Play':'⏸ Pause';$('play').classList.toggle('on',!paused);
+ $('clock').textContent=`tick ${s.t} · day ${Math.floor(s.t/Sim.R.dayLen)+1}`;$('rw').max=s.t;$('rw').value=s.t;$('rwv').textContent=s.t;
+ const f=(x,d=0)=>x.toFixed(d),sa=Sim.stats(A.s),sb=B&&Sim.stats(B.s);
+ const rows=[['Population','pop',0],['Food stock','food',0],['Employment %','emp',1],['Median wealth','med',1],['Mean health','hp',1],['Gov money','gov',0]];
+ $('cmp').innerHTML=`<table><tr><th>tick ${s.t}</th><th>A</th><th>${B?'B':''}</th></tr>${rows.map(([n,k,d])=>`<tr><td>${n}</td><td>${f(sa[k],d)}</td><td>${B?f(sb[k],d):'–'}</td></tr>`).join('')}</table>
+ <div style="color:var(--m);margin-top:4px">A: subsidy ${A.s.pol.subsidy*100|0}%, beds ${A.s.pol.hosp}, tax ${Math.round(A.s.pol.tax*100)}%${B?`<br>B: subsidy ${B.s.pol.subsidy*100|0}%, beds ${B.s.pol.hosp}, tax ${Math.round(B.s.pol.tax*100)}%`:''}</div>`;
+ const c=sel!=null&&s.c[sel];$('ins').innerHTML=c?`<b>Citizen #${c.id}</b> ${c.alive?'':'(dead: '+c.cause+')'}<br>health ${f(c.health,1)} ${c.ill?'· ILL':''}${c.adm?' · admitted':''}<br>food ${c.food} · money ${f(c.money,1)}<br>home ${Sim.nm(s.b[c.home])} · job ${c.job==null?'none':Sim.nm(s.b[c.job])}<br>goal: <b>${c.goal}</b> → ${Sim.nm(s.b[c.tgt])}
+ <div style="margin-top:6px">${c.hist.slice().reverse().map(h=>`<div><span class=tm>t${h.t}</span>${h.g}: ${h.why}</div>`).join('')}</div>`:'Click a citizen dot.';
+ $('log').innerHTML=s.log.slice(-60).reverse().map(l=>`<div><span class=tm>t${l.t}</span>${l.m}</div>`).join('');charts()}
+function frame(now){const dt=Math.min(.25,(now-last)/1000);last=now;if(!paused){acc+=dt*TPS*$('spd').value;let n=0;while(acc>=1&&n++<60){step();acc--}if(now-uiT>200){uiT=now;ui()}}draw();requestAnimationFrame(frame)}
+reset();requestAnimationFrame(t=>{last=t;frame(t)});addEventListener('resize',()=>ui());
+</script></body></html>
